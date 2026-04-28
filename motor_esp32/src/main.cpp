@@ -1,4 +1,4 @@
-/** hey
+/**
  * Motor ESP32 - Cat Plinko Ball Deflector
  */
 
