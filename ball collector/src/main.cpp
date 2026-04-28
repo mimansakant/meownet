@@ -2,44 +2,20 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
-// TFT_eSPI tft = TFT_eSPI(); 
-
-// pin definitions 
-bool pin15Touched = false;
-bool pin12Touched = false;
-bool pin13Touched = false;
-bool pin2Touched = false;
-bool pin33Touched = false;
-
-const char* apSSID = "DRUM_PAD_WIFI";
-const char* apPassword = "drumpad123";
+// WiFi/UDP config
+const char* apSSID = "BALL_TRACKER_WIFI";
+const char* apPassword = "balltrack123";
 const char* laptopIP = "192.168.4.2";
 const int laptopPort = 5005;
 WiFiUDP udp;
 
-void setup() {
-  Serial.begin(115200);
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(apSSID, apPassword);
-  delay(1000); // give me time to bring up serial monitor
-  Serial.println("ESP32 Touch Test");
-}
+// Channel pin definitions
+const int CHANNEL_PINS[] = {15, 12, 32, 33, 27};
+const int NUM_CHANNELS = 5;
+int ballCount[NUM_CHANNELS] = {0};
+bool lastState[NUM_CHANNELS] = {false};
 
-void loop() {
-  char buffer[160];
-  snprintf(buffer, sizeof(buffer), 
-             "15:%d | 12:%d | 13:%d | 2:%d | 33:%d", 
-             touchRead(15), touchRead(12), touchRead(13), touchRead(2), touchRead(33));
-
-    Serial.println(buffer);
-  delay(1000);
-  if (udp.beginPacket(laptopIP, laptopPort)) {
-      udp.print(buffer);
-      udp.endPacket();
-    }
-}
-
-void sendMessage(const char* msg) {
+void sendUDP(const char* msg) {
   if (udp.beginPacket(laptopIP, laptopPort)) {
     udp.print(msg);
     udp.endPacket();
@@ -47,7 +23,50 @@ void sendMessage(const char* msg) {
   }
 }
 
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
+void setup() {
+  Serial.begin(115200);
+
+  // Setup pins
+  for (int i = 0; i < NUM_CHANNELS; i++) {
+    pinMode(CHANNEL_PINS[i], INPUT_PULLDOWN);
+  }
+
+  // Setup WiFi AP
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(apSSID, apPassword);
+  delay(1000);
+  Serial.println("Ball Tracker Debug Mode Started");
+  Serial.print("AP IP: ");
+  Serial.println(WiFi.softAPIP());
+}
+
+void loop() {
+  for (int i = 0; i < NUM_CHANNELS; i++) {
+    bool currentState = digitalRead(CHANNEL_PINS[i]) == HIGH;
+
+    // Only trigger on rising edge (ball just arrived)
+    if (currentState && !lastState[i]) {
+      ballCount[i]++;
+
+      // Build and send a message for this specific event
+      char eventMsg[80];
+      snprintf(eventMsg, sizeof(eventMsg), "BALL channel:%d count:%d", i, ballCount[i]);
+      sendUDP(eventMsg);
+    }
+
+    lastState[i] = currentState;
+  }
+
+  // Also send a full status snapshot every 2 seconds
+  static unsigned long lastSnapshot = 0;
+  if (millis() - lastSnapshot > 2000) {
+    char snapshot[160];
+    snprintf(snapshot, sizeof(snapshot),
+      "COUNTS ch0:%d ch1:%d ch2:%d ch3:%d ch4:%d",
+      ballCount[0], ballCount[1], ballCount[2], ballCount[3], ballCount[4]);
+    sendUDP(snapshot);
+    lastSnapshot = millis();
+  }
+
+  delay(10); // debounce
 }
