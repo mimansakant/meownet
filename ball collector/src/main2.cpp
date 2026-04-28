@@ -1,181 +1,124 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
-#include <AccelStepper.h>
+#include <Stepper.h>
 
-// ─── SLOT CONFIGURATION ──────────────────────────────────────────────────────
-const int NUM_SLOTS             = 5;
-const int SLOT_PINS[NUM_SLOTS]  = {15, 12, 13, 2, 33};
+// ---------- stepper setup ----------
+const int stepsPerRevolution = 2048;  // 28BYJ-48 in 4-wire mode
 
-// "Every other slot is good." Index 0 = pin 15, 1 = pin 12, 2 = pin 13, 3 = pin 2, 4 = pin 33.
-// PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-const bool GOOD_SLOT[NUM_SLOTS] = {true, false, true, false, true};
+// Stepper A — upper-left arm, reacts to slot 2 overflow
+#define A_IN1 13
+#define A_IN2 25
+#define A_IN3 26
+#define A_IN4 17
+Stepper armA(stepsPerRevolution, A_IN1, A_IN3, A_IN2, A_IN4);
 
-// ─── TOUCH / BALL DETECTION ───────────────────────────────────────────────────
-// touchRead() returns LOWER values when the copper tape is touched by a ball.
-// Set this just below your resting (no-ball) baseline reading.
-// PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-const int TOUCH_THRESHOLD = 20;
+// Stepper B — lower-right arm, reacts to slot 4 overflow
+#define B_IN1 21
+#define B_IN2 22
+#define B_IN3 2
+#define B_IN4 3   // NOTE: GPIO 3 is normally UART RX. Serial input disabled.
+Stepper armB(stepsPerRevolution, B_IN1, B_IN3, B_IN2, B_IN4);
 
-// Minimum milliseconds between detections on the same slot (prevents one ball
-// triggering multiple counts while it lingers on the tape).
-// PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-const unsigned long DEBOUNCE_MS = 300;
+// ---------- slot sensors (capacitive touch) ----------
+const int SLOT_PINS[5] = {32, 33, 27, 12, 15};   // slots 1..5
+const int NUM_SLOTS = 5;
+const int BAD_SLOTS[2] = {1, 3};                 // indices for slot 2 and slot 4
 
-// ─── STEPPER MOTOR PINS ───────────────────────────────────────────────────────
-// Using STEP + DIR wiring (works with A4988, DRV8825, TMC2209, etc.).
-// If you are using a ULN2003 with a 28BYJ-48, switch AccelStepper::DRIVER to
-// AccelStepper::HALF4WIRE and replace these with your four IN pins.
-// PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-#define MOTOR1_STEP_PIN  16
-#define MOTOR1_DIR_PIN   17
-#define MOTOR2_STEP_PIN  18
-#define MOTOR2_DIR_PIN   19
+// touchRead returns LOWER values when touched. Tune this on your board.
+const int TOUCH_THRESHOLD = 40;
 
-// ─── STEPPER TUNING ───────────────────────────────────────────────────────────
-// PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-const float MOTOR_MAX_SPEED    = 200.0;  // steps / second
-const float MOTOR_ACCELERATION = 100.0;  // steps / second²
+// ---------- rolling window ----------
+const int WINDOW_SIZE = 10;
+int recentSlots[WINDOW_SIZE];   // ring buffer of slot indices (0..4)
+int windowCount = 0;            // how many entries currently valid (<= WINDOW_SIZE)
+int windowHead = 0;             // next write position
 
-// How far each motor moves per corrective nudge (in steps).
-// PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-const int NUDGE_STEPS = 50;
+// ---------- arm position tracking ----------
+const int MAX_DEFLECT_STEPS = stepsPerRevolution / 4;
+int armAPosition = 0;
+int armBPosition = 0;
 
-// How many extra bad-slot hits (vs good) before a nudge fires.
-// PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-const int IMBALANCE_TRIGGER = 3;
+// ---------- ball-edge detection ----------
+bool slotActive[5] = {false, false, false, false, false};
+unsigned long lastTriggerMs[5] = {0, 0, 0, 0, 0};
+const unsigned long DEBOUNCE_MS = 150;
 
-// ─── WIFI / UDP ───────────────────────────────────────────────────────────────
-const char* apSSID     = "DRUM_PAD_WIFI";
-const char* apPassword = "drumpad123";
-const char* laptopIP   = "192.168.4.2";
-const int   laptopPort = 5005;
-WiFiUDP udp;
+// ---------- forward declarations (required for .cpp) ----------
+void recordBall(int slotIndex);
+int countInWindow(int slotIndex);
+void moveArmTo(Stepper &motor, int &currentPos, int targetPos);
+int desiredDeflection(int slotIndex);
 
-// ─── MOTOR OBJECTS ────────────────────────────────────────────────────────────
-// PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-// Change AccelStepper::DRIVER to AccelStepper::HALF4WIRE if using ULN2003.
-AccelStepper motor1(AccelStepper::DRIVER, MOTOR1_STEP_PIN, MOTOR1_DIR_PIN);
-AccelStepper motor2(AccelStepper::DRIVER, MOTOR2_STEP_PIN, MOTOR2_DIR_PIN);
-
-// ─── STATE ────────────────────────────────────────────────────────────────────
-int           ballCount[NUM_SLOTS]   = {0};
-unsigned long lastHitTime[NUM_SLOTS] = {0};
-bool          slotActive[NUM_SLOTS]  = {false};
-
-int totalGoodHits = 0;
-int totalBadHits  = 0;
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-void sendUDP(const char* msg) {
-  if (udp.beginPacket(laptopIP, laptopPort)) {
-    udp.print(msg);
-    udp.endPacket();
-  }
-  Serial.println(msg);
-}
-
-// Called every time a new ball is detected.
-// Compares cumulative good vs bad hits and nudges the motors if the board is
-// sending too many balls into bad slots.
-//
-// Motor 1 handles left-side imbalance, Motor 2 handles right-side imbalance.
-// The specific slots that count as "left" vs "right" are placeholders — map
-// them to your physical board layout once you can test.
-void adjustMotors() {
-  // ── Left-side balance (motor 1) ──────────────────────────────────────────
-  // PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-  // Slot index 1 (pin 12) is the left bad slot. Slot index 0 (pin 15) is the
-  // left good slot. Adjust these indices to match your physical board.
-  int leftImbalance = ballCount[1] - ballCount[0];  // positive = too many bad hits on left
-
-  if (leftImbalance >= IMBALANCE_TRIGGER) {
-    // Too many balls falling into the left bad slot — nudge motor 1
-    // PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-    // Positive steps = which physical direction steers balls away from slot 1.
-    motor1.move(NUDGE_STEPS);
-    sendUDP("ADJUST: motor1 nudge + (left bad slot overflow)");
-  } else if (leftImbalance <= -IMBALANCE_TRIGGER) {
-    motor1.move(-NUDGE_STEPS);
-    sendUDP("ADJUST: motor1 nudge - (left good slot starved)");
-  }
-
-  // ── Right-side balance (motor 2) ─────────────────────────────────────────
-  // PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-  // Slot index 3 (pin 2) is the right bad slot. Slot index 4 (pin 33) is the
-  // right good slot. Adjust these indices to match your physical board.
-  int rightImbalance = ballCount[3] - ballCount[4];  // positive = too many bad hits on right
-
-  if (rightImbalance >= IMBALANCE_TRIGGER) {
-    // PLACEHOLDER VALUE HERE, UPDATE WHEN TESTING ON BOARD
-    motor2.move(NUDGE_STEPS);
-    sendUDP("ADJUST: motor2 nudge + (right bad slot overflow)");
-  } else if (rightImbalance <= -IMBALANCE_TRIGGER) {
-    motor2.move(-NUDGE_STEPS);
-    sendUDP("ADJUST: motor2 nudge - (right good slot starved)");
-  }
-}
-
-// ─── SETUP ────────────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
+  // (no Serial.read — GPIO 3 reassigned to stepper)
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(apSSID, apPassword);
-  delay(1000);
-  Serial.println("Meownet Ball Detector — starting");
+  armA.setSpeed(10);
+  armB.setSpeed(10);
 
-  motor1.setMaxSpeed(MOTOR_MAX_SPEED);
-  motor1.setAcceleration(MOTOR_ACCELERATION);
-  motor2.setMaxSpeed(MOTOR_MAX_SPEED);
-  motor2.setAcceleration(MOTOR_ACCELERATION);
+  Serial.println("Pachinko controller ready.");
 }
 
-// ─── LOOP ─────────────────────────────────────────────────────────────────────
+void recordBall(int slotIndex) {
+  recentSlots[windowHead] = slotIndex;
+  windowHead = (windowHead + 1) % WINDOW_SIZE;
+  if (windowCount < WINDOW_SIZE) windowCount++;
+}
+
+int countInWindow(int slotIndex) {
+  int c = 0;
+  for (int i = 0; i < windowCount; i++) {
+    if (recentSlots[i] == slotIndex) c++;
+  }
+  return c;
+}
+
+void moveArmTo(Stepper &motor, int &currentPos, int targetPos) {
+  int delta = targetPos - currentPos;
+  if (delta != 0) {
+    motor.step(delta);
+    currentPos = targetPos;
+  }
+}
+
+int desiredDeflection(int slotIndex) {
+  if (windowCount == 0) return 0;
+  float share = (float)countInWindow(slotIndex) / (float)windowCount;
+  float expected = 1.0f / NUM_SLOTS;       // 0.20
+  float excess = share - expected;         // 0..0.80
+  if (excess <= 0) return 0;
+  float scale = excess / (1.0f - expected);
+  if (scale > 1.0f) scale = 1.0f;
+  return (int)(scale * MAX_DEFLECT_STEPS);
+}
+
 void loop() {
   unsigned long now = millis();
 
-  // ── Ball detection ──────────────────────────────────────────────────────
   for (int i = 0; i < NUM_SLOTS; i++) {
-    int  raw     = touchRead(SLOT_PINS[i]);
-    bool touched = (raw < TOUCH_THRESHOLD);
+    int reading = touchRead(SLOT_PINS[i]);
+    bool touched = (reading < TOUCH_THRESHOLD);
 
-    if (touched && !slotActive[i] && (now - lastHitTime[i] > DEBOUNCE_MS)) {
-      ballCount[i]++;
-      lastHitTime[i] = now;
-      slotActive[i]  = true;
-
-      if (GOOD_SLOT[i]) totalGoodHits++;
-      else              totalBadHits++;
-
-      char msg[96];
-      snprintf(msg, sizeof(msg),
-               "BALL slot=%d pin=%d count=%d %s | good=%d bad=%d",
-               i, SLOT_PINS[i], ballCount[i],
-               GOOD_SLOT[i] ? "GOOD" : "BAD",
-               totalGoodHits, totalBadHits);
-      sendUDP(msg);
-
-      adjustMotors();
+    if (touched && !slotActive[i] && (now - lastTriggerMs[i] > DEBOUNCE_MS)) {
+      slotActive[i] = true;
+      lastTriggerMs[i] = now;
+      recordBall(i);
+      Serial.print("Ball -> slot ");
+      Serial.print(i + 1);
+      Serial.print("  | counts: ");
+      for (int j = 0; j < NUM_SLOTS; j++) {
+        Serial.print(countInWindow(j));
+        Serial.print(j == NUM_SLOTS - 1 ? "" : ",");
+      }
+      Serial.print("  (window=");
+      Serial.print(windowCount);
+      Serial.println(")");
+    } else if (!touched && slotActive[i]) {
+      slotActive[i] = false;
     }
-
-    if (!touched) slotActive[i] = false;
   }
 
-  // ── Keep motors stepping toward their targets ───────────────────────────
-  motor1.run();
-  motor2.run();
-
-  // ── Periodic status broadcast (every 5 s) ──────────────────────────────
-  static unsigned long lastStatus = 0;
-  if (now - lastStatus >= 5000) {
-    lastStatus = now;
-    char status[160];
-    snprintf(status, sizeof(status),
-             "STATUS s0:%d s1:%d s2:%d s3:%d s4:%d | good:%d bad=%d | m1:%ld m2:%ld",
-             ballCount[0], ballCount[1], ballCount[2], ballCount[3], ballCount[4],
-             totalGoodHits, totalBadHits,
-             motor1.currentPosition(), motor2.currentPosition());
-    sendUDP(status);
-  }
+  int targetA = desiredDeflection(BAD_SLOTS[0]);  // slot 2
+  int targetB = desiredDeflection(BAD_SLOTS[1]);  // slot 4
+  moveArmTo(armA, armAPosition, targetA);
+  moveArmTo(armB, armBPosition, targetB);
 }
