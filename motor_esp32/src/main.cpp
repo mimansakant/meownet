@@ -115,8 +115,5 @@ void setup() {
 }
 
 void loop() {
-    moveSteps(1024);   // move one direction
-    delay(1000);
-    moveSteps(-1024);  // move back
-    delay(1000);
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }
