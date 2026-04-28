@@ -15,13 +15,10 @@
 #define STEP_DELAY_US 3000
 
 int currentPosition = 0;
-int maxPosition = 2048;
+int maxPosition = 512;
 
-typedef struct {
-    uint8_t  motor_id;
-    int8_t   adjustment;
-    uint32_t ball_count;
-    char     message[64];
+typedef struct __attribute__((packed)) {
+    int8_t adjustment;
 } MotorFlag;
 
 const int stepSequence[4][4] = {
@@ -61,32 +58,27 @@ void moveSteps(int steps) {
 void adjustMotor(int8_t adjustment) {
     int targetSteps = adjustment * STEPS_PER_ADJUSTMENT;
     int newPosition = currentPosition + targetSteps;
-    newPosition = max(-maxPosition, min(maxPosition, newPosition));
+   
+    // If at limit, reset to center
+    if (newPosition > maxPosition || newPosition < -maxPosition) {
+        Serial.println("[MOTOR] At limit — resetting to center");
+        moveSteps(-currentPosition);
+        currentPosition = 0;
+        return;
+    }
+   
     int actualSteps = newPosition - currentPosition;
-
     if (actualSteps != 0) {
-        Serial.printf("[MOTOR] Moving %d steps (position: %d → %d)\n",
-                      actualSteps, currentPosition, newPosition);
+        Serial.printf("[MOTOR] Moving %d steps\n", actualSteps);
         moveSteps(actualSteps);
         currentPosition = newPosition;
-    } else {
-        Serial.println("[MOTOR] Already at limit, not moving");
     }
 }
 
 void onDataReceived(const uint8_t* mac, const uint8_t* data, int len) {
-    if (len != sizeof(MotorFlag)) {
-        Serial.println("[ESP-NOW] Received unexpected data size");
-        return;
-    }
-
-    MotorFlag flag;
-    memcpy(&flag, data, sizeof(flag));
-
-    Serial.printf("[ESP-NOW] motor_id=%d adjustment=%+d count=%lu msg=%s\n",
-                  flag.motor_id, flag.adjustment, flag.ball_count, flag.message);
-
-    adjustMotor(flag.adjustment);
+    int8_t adjustment = (int8_t)data[0];
+    Serial.printf("[ESP-NOW] Received %d bytes, adjustment=%d\n", len, adjustment);
+    adjustMotor(adjustment);
 }
 
 void setup() {
