@@ -22,7 +22,7 @@ typedef struct {
     int8_t   adjustment;
     uint32_t ball_count;
     char     message[64];
-} MonitorFlag;
+} MotorFlag;
 
 const int stepSequence[4][4] = {
     {1, 1, 0, 0},
@@ -75,12 +75,12 @@ void adjustMotor(int8_t adjustment) {
 }
 
 void onDataReceived(const uint8_t* mac, const uint8_t* data, int len) {
-    if (len != sizeof(MonitorFlag)) {
+    if (len != sizeof(MotorFlag)) {
         Serial.println("[ESP-NOW] Received unexpected data size");
         return;
     }
 
-    MonitorFlag flag;
+    MotorFlag flag;
     memcpy(&flag, data, sizeof(flag));
 
     Serial.printf("[ESP-NOW] motor_id=%d adjustment=%+d count=%lu msg=%s\n",
