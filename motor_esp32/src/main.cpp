@@ -1,33 +1,21 @@
 /**
  * Motor ESP32 - Cat Plinko Ball Deflector
- * 
- * OVERVIEW:
- * =========
- * Receives ESP-NOW messages from the sensor ESP32 and adjusts
- * a stepper motor arm to change ball distribution.
- * 
- * HARDWARE:
- * =========
- * - ESP32
- * - Stepper motor + ULN2003 driver board (or A4988)
- * - 3D printed arm attached to shaft coupler
-
+ */
 
 #include <Arduino.h>
 #include <esp_now.h>
 #include <WiFi.h>
 
-#define MOTOR_IN1 13
-#define MOTOR_IN2 26
-#define MOTOR_IN3 27
-#define MOTOR_IN4 5
+#define MOTOR_IN1 32
+#define MOTOR_IN2 27
+#define MOTOR_IN3 26
+#define MOTOR_IN4 13
 
-#define STEPS_PER_REV 2048
-#define STEPS_PER_ADJUSTMENT 256
-#define STEP_DELAY_US 1200
+#define STEPS_PER_ADJUSTMENT 1024
+#define STEP_DELAY_US 3000
 
 int currentPosition = 0;
-int maxPosition = 512;
+int maxPosition = 2048;
 
 typedef struct {
     uint8_t  motor_id;
@@ -37,10 +25,10 @@ typedef struct {
 } MonitorFlag;
 
 const int stepSequence[4][4] = {
-    {1, 0, 0, 0},
-    {0, 1, 0, 0},
-    {0, 0, 1, 0},
-    {0, 0, 0, 1}
+    {1, 1, 0, 0},
+    {0, 1, 1, 0},
+    {0, 0, 1, 1},
+    {1, 0, 0, 1}
 };
 
 void setMotorPins(int step) {
