@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meownet — A Self-Balancing Pachinko Cat</title>
+  <meta name="description" content="A runtime-monitored pachinko machine that watches where the balls fall and physically intervenes when the distribution gets too lopsided." />
+
+  <!-- Fonts: editorial serif for body, refined sans for headings -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      /* warm paper palette */
+      --paper:        #f4efe6;
+      --paper-deep:   #ece5d6;
+      --ink:          #1f1d1a;
+      --ink-soft:     #4a463f;
+      --ink-faint:    #8a8478;
+      --rule:         #d6cfbf;
+
+      /* muted burgundy accent */
+      --accent:       #6b1f2a;
+      --accent-soft:  #8a3540;
+      --accent-glow:  rgba(107, 31, 42, 0.08);
+
+      /* brass nail */
+      --brass:        #b08a3e;
+      --brass-deep:   #8a6a2c;
+
+      --measure: 68ch;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Fraunces", Georgia, "Times New Roman", serif;
+      font-size: 18px;
+      line-height: 1.65;
+      font-feature-settings: "ss01", "ss02";
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    /* faint brass-nail field in the page margins (decorative, behind content) */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle, var(--brass) 0.8px, transparent 1.2px);
+      background-size: 28px 28px;
+      background-position: 14px 14px;
+      opacity: 0.06;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    main, header, footer { position: relative; z-index: 1; }
+
+    /* ---------- header ---------- */
+    header.masthead {
+      max-width: var(--measure);
+      margin: 0 auto;
+      padding: 6rem 1.5rem 2rem;
+      text-align: left;
+    }
+
+    .eyebrow {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0 0 1.5rem;
+    }
+
+    h1.title {
+      font-family: "Fraunces", serif;
+      font-weight: 600;
+      font-size: clamp(2.4rem, 6vw, 4.2rem);
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+      margin: 0 0 1.25rem;
+      color: var(--ink);
+    }
+
+    h1.title em {
+      font-style: italic;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .dek {
+      font-size: 1.15rem;
+      line-height: 1.55;
+      color: var(--ink-soft);
+      font-style: italic;
+      max-width: 56ch;
+      margin: 0 0 2.5rem;
+    }
+
+    .meta {
+      font-family: "Inter Tight", sans-serif;
+      font-size: 0.82rem;
+      letter-spacing: 0.02em;
+      color: var(--ink-faint);
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      padding-top: 1rem;
+      border-top: 1px solid var(--rule);
+    }
+
+    .meta span strong {
+      color: var(--ink-soft);
+      font-weight: 500;
+    }
+
+    /* ---------- article body ---------- */
+    article {
+      max-width: var(--measure);
+      margin: 0 auto;
+      padding: 1rem 1.5rem 4rem;
+    }
+
+    article p {
+      margin: 0 0 1.4rem;
+    }
+
+    /* drop cap on first paragraph after the first H2 */
+    article > h2 + p::first-letter {
+      font-family: "Fraunces", serif;
+      font-weight: 600;
+      font-size: 3.6rem;
+      line-height: 0.85;
+      float: left;
+      padding: 0.35rem 0.55rem 0 0;
+      color: var(--accent);
+    }
+
+    article h2 {
+      font-family: "Inter Tight", sans-serif;
+      font-weight: 600;
+      font-size: 1.4rem;
+      letter-spacing: -0.005em;
+      color: var(--ink);
+      margin: 3.5rem 0 1.25rem;
+      padding-top: 0.5rem;
+    }
+
+    article h2::before {
+      content: "";
+      display: block;
+      width: 2.5rem;
+      height: 2px;
+      background: var(--accent);
+      margin-bottom: 1rem;
+    }
+
+    article h3 {
+      font-family: "Inter Tight", sans-serif;
+      font-weight: 600;
+      font-size: 1.05rem;
+      color: var(--ink);
+      margin: 2rem 0 0.75rem;
+    }
+
+    article a {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid var(--accent-soft);
+      transition: background 160ms ease, color 160ms ease;
+      padding: 0 1px;
+    }
+    article a:hover {
+      background: var(--accent-glow);
+      color: var(--accent-soft);
+    }
+
+    article strong {
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    /* numbered + bulleted lists */
+    article ul, article ol {
+      padding-left: 1.4rem;
+      margin: 0 0 1.4rem;
+    }
+    article li {
+      margin: 0 0 0.5rem;
+      padding-left: 0.25rem;
+    }
+    article ul li::marker { color: var(--brass-deep); }
+    article ol li::marker { color: var(--accent); font-family: "IBM Plex Mono", monospace; }
+
+    /* inline code + code blocks */
+    code {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.85em;
+      background: var(--paper-deep);
+      padding: 0.08em 0.35em;
+      border-radius: 2px;
+      color: var(--accent-soft);
+    }
+
+    pre {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.82rem;
+      background: var(--paper-deep);
+      border-left: 3px solid var(--accent);
+      padding: 1rem 1.25rem;
+      margin: 1.5rem 0;
+      overflow-x: auto;
+      line-height: 1.55;
+      color: var(--ink-soft);
+    }
+    pre code { background: none; padding: 0; color: inherit; }
+
+    /* blockquote, used for the RTLola placeholder */
+    blockquote {
+      font-style: italic;
+      color: var(--ink-soft);
+      border-left: 3px solid var(--brass);
+      padding: 0.25rem 0 0.25rem 1.1rem;
+      margin: 1.5rem 0;
+      background: linear-gradient(to right, var(--paper-deep), transparent 60%);
+    }
+
+    /* ---------- figures ---------- */
+    figure {
+      margin: 2.5rem 0;
+      padding: 0;
+    }
+
+    figure img, figure video {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--paper-deep);
+      border: 1px solid var(--rule);
+    }
+
+    /* placeholder image styling — gives a subtle indicator before media is added */
+    figure img[src^="images/"] {
+      aspect-ratio: 16 / 10;
+      object-fit: cover;
+    }
+
+    figcaption {
+      font-family: "Inter Tight", sans-serif;
+      font-size: 0.82rem;
+      color: var(--ink-faint);
+      margin-top: 0.6rem;
+      letter-spacing: 0.01em;
+    }
+
+    /* ---------- pachinko nail divider ---------- */
+    .nail-divider {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      margin: 3.5rem 0;
+      padding: 0;
+      list-style: none;
+    }
+    .nail-divider li {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--brass);
+      box-shadow: 0 1px 0 rgba(0,0,0,0.12);
+      margin: 0;
+      padding: 0;
+    }
+    /* center nail slightly larger to suggest a pin */
+    .nail-divider li:nth-child(4) {
+      width: 6px;
+      height: 6px;
+      background: var(--brass-deep);
+      transform: translateY(-1px);
+    }
+
+    /* ---------- pull quote / spec callout ---------- */
+    .callout {
+      margin: 2rem 0;
+      padding: 1.25rem 1.5rem;
+      background: var(--paper-deep);
+      border: 1px solid var(--rule);
+      border-left: 3px solid var(--accent);
+      font-size: 0.95rem;
+      line-height: 1.55;
+      color: var(--ink-soft);
+    }
+    .callout strong { color: var(--ink); }
+
+    /* ---------- footer "slot row" ---------- */
+    footer.slots {
+      max-width: var(--measure);
+      margin: 4rem auto 0;
+      padding: 0 1.5rem 4rem;
+      position: relative;
+    }
+
+    .slot-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      margin-bottom: 1.5rem;
+      padding-top: 2rem;
+      border-top: 1px solid var(--rule);
+    }
+    .slot-row div {
+      height: 28px;
+      position: relative;
+    }
+    .slot-row div::before {
+      content: "";
+      position: absolute;
+      inset: 0 2px;
+      background: repeating-linear-gradient(
+        45deg,
+        var(--brass) 0,
+        var(--brass) 1px,
+        transparent 1px,
+        transparent 4px
+      );
+      opacity: 0.45;
+    }
+    /* mark slots 2 and 4 (poison) with burgundy tint */
+    .slot-row div:nth-child(2)::before,
+    .slot-row div:nth-child(4)::before {
+      background: repeating-linear-gradient(
+        45deg,
+        var(--accent-soft) 0,
+        var(--accent-soft) 1px,
+        transparent 1px,
+        transparent 4px
+      );
+      opacity: 0.55;
+    }
+    .slot-labels {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      text-align: center;
+    }
+    .slot-labels span:nth-child(2),
+    .slot-labels span:nth-child(4) { color: var(--accent-soft); }
+
+    .colophon {
+      font-family: "Inter Tight", sans-serif;
+      font-size: 0.82rem;
+      color: var(--ink-faint);
+      text-align: center;
+      margin-top: 2.5rem;
+      line-height: 1.6;
+    }
+    .colophon a {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid var(--accent-soft);
+    }
+
+    /* ---------- responsive ---------- */
+    @media (max-width: 600px) {
+      html, body { font-size: 17px; }
+      header.masthead { padding: 3.5rem 1.25rem 1.5rem; }
+      article { padding: 0.5rem 1.25rem 3rem; }
+      .meta { gap: 1rem; font-size: 0.78rem; }
+      article h2 { margin-top: 2.75rem; }
+      .nail-divider { margin: 2.5rem 0; }
+    }
+
+    /* small print-friendly nicety */
+    @media print {
+      body::before { display: none; }
+      a { color: var(--ink); border: none; }
+      pre, .callout, blockquote { background: transparent; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="masthead">
+    <p class="eyebrow">Mod 4 · Runtime Monitoring</p>
+    <h1 class="title">Meownet: a self-balancing <em>pachinko cat</em></h1>
+    <p class="dek">A runtime-monitored pachinko machine that watches where the balls fall and physically intervenes when the distribution gets too lopsided. Built by a team of five over two and a half weeks.</p>
+    <div class="meta">
+      <span><strong>Team</strong> &nbsp;5 people</span>
+      <span><strong>Stack</strong> &nbsp;ESP32, ESP-NOW, RTLola, TFT_eSPI</span>
+      <span><strong>Repo</strong> &nbsp;<a href="https://github.com/mimansakant/meownet">mimansakant/meownet</a></span>
+    </div>
+  </header>
+
+  <article>
+
+    <figure>
+      <img src="images/01_meownet_hero.jpg" alt="Wide shot of the finished Meownet board" />
+      <figcaption>Meownet, the patron saint of redistributive ball physics.</figcaption>
+    </figure>
+
+    <h2>The premise</h2>
+    <p>Most pachinko machines are passive. You drop a ball, gravity and a field of nails decide where it goes, and the resulting distribution is whatever the nail layout produces. The assignment for this module asked us to build something stranger: a pachinko machine that <strong>monitors its own output in real time</strong> and physically adjusts itself to reshape the distribution as it plays.</p>
+
+    <p>We took that brief and ran with it. Our board is a tall black cat, hand-painted, with brass nails as the pachinko field, a 3D-printed ball collector at the bottom split into five channels, and two stepper-driven arms partway down the playfield that swing to deflect balls away from over-represented channels. The whole thing is themed around feeding and poisoning the cat: three of the five slots are food, two are poison, and Meownet's job is to keep herself alive.</p>
+
+    <figure>
+      <img src="images/02_cat_face.jpg" alt="Close-up of the cat's face and the TTGO display cutout" />
+      <figcaption>The face hosts a small color TFT for an animated eye. More on that below.</figcaption>
+    </figure>
+
+    <ul class="nail-divider" aria-hidden="true">
+      <li></li><li></li><li></li><li></li><li></li><li></li><li></li>
+    </ul>
+
+    <h2>System architecture</h2>
+    <p>The project decomposes into three independent ESP32 nodes communicating over ESP-NOW:</p>
+    <ol>
+      <li><strong>Ball counter.</strong> Reads the five channels at the bottom of the board, counts each ball that passes, and broadcasts distribution data.</li>
+      <li><strong>Motor controllers.</strong> Receive distribution updates and drive two 28BYJ-48 stepper motors with ULN2003 drivers to swing the deflection arms.</li>
+      <li><strong>Cat eye display.</strong> A LilyGO TTGO T-Display tucked into a cutout in the cat's face, running an animated cat eye independently on battery power.</li>
+    </ol>
+    <p>We chose ESP-NOW over Wi-Fi or Bluetooth because the spec required low-latency wireless communication between the counter and the motor controllers, and ESP-NOW gives us connectionless peer-to-peer messaging with sub-millisecond delivery and no router in the loop. The trade-off is that you have to manage MAC addresses and pairing manually.</p>
+
+    <figure>
+      <img src="images/03_architecture.jpg" alt="System architecture diagram or wiring photo" />
+      <figcaption>Three nodes, one cat. The eye is fully decoupled — it just looks alive.</figcaption>
+    </figure>
+
+    <h2>Detection: copper tape as a contact switch</h2>
+    <p>Each of the five channels in the 3D-printed collector has two strips of copper tape running across its floor with a small gap between them. When a metal ball rolls through, it bridges the two strips and closes a circuit. One strip is tied to 3.3V through a pull-up resistor; the other goes to a digital input on the ESP32. The ESP32 sees a <code>HIGH → LOW</code> transition the instant a ball lands and rolls across.</p>
+
+    <p>We initially considered capacitive touch using <code>touchRead()</code> on the ESP32's built-in touch pins, which would have needed only a single strip per channel. We dropped that idea because the contact-switch approach is more deterministic — capacitive readings drift with humidity, hand proximity, and cable length, and we didn't want to be re-tuning thresholds during the demo. Two strips and a resistor per channel is dumber, more reliable hardware, and the spec called for resistors anyway.</p>
+
+    <figure>
+      <img src="images/04_collector_closeup.jpg" alt="Close-up of the 3D-printed ball collector with copper tape" />
+      <figcaption>Two strips of copper tape per channel. A ball bridging them closes the switch.</figcaption>
+    </figure>
+
+    <p>Each channel triggers an interrupt on the ball-counter ESP32, which increments a per-channel count and a rolling history. Debouncing is done in software — once a channel triggers, further triggers within ~150&nbsp;ms are ignored, which prevents a single ball from being double-counted as it bounces across the gap.</p>
+
+    <ul class="nail-divider" aria-hidden="true">
+      <li></li><li></li><li></li><li></li><li></li><li></li><li></li>
+    </ul>
+
+    <h2>When to broadcast: the runtime monitor</h2>
+    <p>The naive thing to do is broadcast a message to the motor ESP32s every time a ball is counted. We did the math on that and it's a bad idea: at five balls per second across five channels, you'd be flooding ESP-NOW with messages that mostly say nothing has changed. The motor nodes would either lag behind or burn cycles processing redundant updates.</p>
+
+    <p>The cleaner approach, and what the assignment asked for, is to write a <strong>runtime monitoring specification</strong> that watches the count variables and only triggers a broadcast at meaningful inflection points — when the distribution actually shifts enough that the motors should reconsider their position. We used RTLola for this.</p>
+
+    <div class="callout">
+      <strong>RTLola spec snippet</strong> — to be added once finalized. In plain English, the spec watches the ratio of balls falling into the "poison" channels (slots&nbsp;2 and 4) versus the "food" channels (slots&nbsp;1, 3, and 5) over a rolling window, and fires a <code>redistribute</code> event whenever that ratio crosses a threshold. The motor nodes only hear from the counter when they actually need to do something.
+    </div>
+
+    <h2>The arms: proportional deflection</h2>
+    <p>Each of the two deflection arms is a 3D-printed paddle mounted on a shaft coupler driven by a 28BYJ-48 stepper through a ULN2003 driver. They sit slightly off-center in the cat's belly area, where the ball field starts to funnel toward the channels.</p>
+
+    <figure>
+      <img src="images/05_arm_closeup.jpg" alt="Close-up of one of the stepper arms and 3D-printed paddle" />
+      <figcaption>Shaft coupler, 3D-printed paddle, hidden behind the painted belly disc.</figcaption>
+    </figure>
+
+    <p>Arm behavior is <strong>proportional</strong>, not binary. Rather than flipping between "neutral" and "deflect," each arm tilts further as its corresponding poison channel becomes more over-represented. The motor controller receives the distribution snapshot, computes each poison channel's share against the expected 20%, and maps the excess linearly to a step count up to a quarter revolution. If slot&nbsp;2 has 20% of recent balls, arm A is at rest. If it has 60%, arm A is at about half deflection. If it has 100%, arm A is at full quarter-turn.</p>
+
+    <p>Because steppers maintain absolute position, we track each arm's current step count and only drive the <em>delta</em> between current and target. This avoids the arms hunting back and forth and keeps them quiet between updates.</p>
+
+    <ul class="nail-divider" aria-hidden="true">
+      <li></li><li></li><li></li><li></li><li></li><li></li><li></li>
+    </ul>
+
+    <h2>Pin budget: the part that nearly killed us</h2>
+    <p>The most surprising lesson of the build was how tight the GPIO budget gets on a single ESP32 once you start counting real-world peripherals. Two ULN2003 drivers want eight outputs. Five sensor channels want five inputs. That's thirteen pins before you account for serial, strapping pins, input-only pins, and the four GPIOs (34, 35, 36, 39) that <em>literally cannot drive outputs</em> on the ESP32 at all.</p>
+
+    <p>Splitting the work across multiple ESPs — counter, motors, eye — wasn't just an architectural nicety, it was a hardware necessity. The ESP-NOW link is doing real load-bearing work.</p>
+
+    <figure>
+      <img src="images/06_wiring.jpg" alt="Wiring detail showing breadboard and ESP32" />
+      <figcaption>The wiring is uglier than the cat. As it should be.</figcaption>
+    </figure>
+
+    <p>We also lost an afternoon early on to the input-only-pins gotcha. The first stepper test refused to spin no matter what we tried. The motor was fine. The driver was fine. The code was fine. The pins we'd picked were 36, 37, 38, 39 — all input-only on the ESP32. <code>digitalWrite</code> on those pins silently does nothing. There's no error, no warning, no hint. The motor just sits there. If you take one thing away from this post, let it be: <strong>read the pin capability table for your specific ESP32 variant before you wire anything.</strong></p>
+
+    <h2>The cat eye</h2>
+    <p>The face cutout on Meownet hosts a LilyGO TTGO T-Display: a tiny ESP32 dev board with a 1.14" ST7789 color TFT built in. It runs entirely on its own battery and is not part of the ESP-NOW network. Its only job is to look alive.</p>
+
+    <p>The eye is a green iris with a vertical slit pupil drawn into an off-screen sprite using <code>TFT_eSPI</code>, then pushed to the display in one frame to avoid flicker. The pupil drifts to a new random position every couple of seconds, and the eye blinks every few seconds with eyelids closing from top and bottom.</p>
+
+    <figure>
+      <img src="images/07_cat_eye.jpg" alt="The cat eye running on the TTGO T-Display" />
+      <figcaption>Decorative, but the thing visitors notice first.</figcaption>
+    </figure>
+
+    <ul class="nail-divider" aria-hidden="true">
+      <li></li><li></li><li></li><li></li><li></li><li></li><li></li>
+    </ul>
+
+    <h2>Demo</h2>
+    <figure>
+      <video controls preload="metadata" poster="images/01_meownet_hero.jpg">
+        <source src="videos/01_full_demo.mp4" type="video/mp4" />
+      </video>
+      <figcaption>Full system running. Balls drop, channels count, arms react.</figcaption>
+    </figure>
+
+    <figure>
+      <video controls preload="metadata">
+        <source src="videos/02_arms_reacting.mp4" type="video/mp4" />
+      </video>
+      <figcaption>Close-up of the arms tilting in response to a deliberately skewed input.</figcaption>
+    </figure>
+
+    <h2>Reflections</h2>
+    <p>A few things we'd do differently with another week:</p>
+    <ul>
+      <li><strong>Calibrate the arm-to-channel mapping empirically.</strong> Right now arm A "covers" slot 2 and arm B "covers" slot 4 by geometric intuition. With more time we'd have run trials with arms in fixed positions and measured how each angle actually shifts the distribution, then fit the control law to the measurements.</li>
+      <li><strong>Better debouncing on the contact switches.</strong> A few balls bounce hard enough across the copper that they trigger twice. The 150&nbsp;ms software debounce catches most of it, but not all.</li>
+      <li><strong>Tighter integration between the eye and the rest of the system.</strong> The eye is decorative right now. With ESP-NOW it could react to events — narrow when the cat is being "poisoned," widen when the distribution is healthy.</li>
+    </ul>
+
+    <p>The code, RTLola spec, and STL files are all on the team repo: <a href="https://github.com/mimansakant/meownet">github.com/mimansakant/meownet</a>.</p>
+
+    <figure>
+      <img src="images/08_team_or_final.jpg" alt="Group shot or final beauty shot of the project" />
+      <figcaption>Five people, two and a half weeks, one cat.</figcaption>
+    </figure>
+
+  </article>
+
+  <footer class="slots">
+    <div class="slot-row" aria-hidden="true">
+      <div></div><div></div><div></div><div></div><div></div>
+    </div>
+    <div class="slot-labels" aria-hidden="true">
+      <span>01 food</span>
+      <span>02 poison</span>
+      <span>03 food</span>
+      <span>04 poison</span>
+      <span>05 food</span>
+    </div>
+    <p class="colophon">
+      Built for Mod 4: Runtime Monitoring of Pachinko.<br/>
+      Source on <a href="https://github.com/mimansakant/meownet">GitHub</a>.
+    </p>
+  </footer>
+
+</body>
+</html>
