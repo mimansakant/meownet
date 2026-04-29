@@ -462,10 +462,6 @@
 
     <p>The cleaner approach, and what the assignment asked for, is to write a <strong>runtime monitoring specification</strong> that watches the count variables and only triggers a broadcast at meaningful inflection points — when the distribution actually shifts enough that the motors should reconsider their position. We used RTLola for this.</p>
 
-    <div class="callout">
-      <strong>RTLola spec snippet</strong> — to be added once finalized. In plain English, the spec watches the ratio of balls falling into the "poison" channels (slots&nbsp;2 and 4) versus the "food" channels (slots&nbsp;1, 3, and 5) over a rolling window, and fires a <code>redistribute</code> event whenever that ratio crosses a threshold. The motor nodes only hear from the counter when they actually need to do something.
-    </div>
-
     <h2>The arms: proportional deflection</h2>
     <p>Each of the two deflection arms is a 3D-printed paddle mounted on a shaft coupler driven by a 28BYJ-48 stepper through a ULN2003 driver. They sit slightly off-center in the cat's belly area, where the ball field starts to funnel toward the channels.</p>
 
