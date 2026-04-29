@@ -442,8 +442,6 @@
     <h2>Detection: copper tape as a contact switch</h2>
     <p>Each of the five channels in the 3D-printed collector has two strips of copper tape running across its floor with a small gap between them. When a metal ball rolls through, it bridges the two strips and closes a circuit. One strip is tied to 3.3V through a pull-up resistor; the other goes to a digital input on the ESP32. The ESP32 sees a <code>HIGH → LOW</code> transition the instant a ball lands and rolls across.</p>
 
-    <p>We initially considered capacitive touch using <code>touchRead()</code> on the ESP32's built-in touch pins, which would have needed only a single strip per channel. We dropped that idea because the contact-switch approach is more deterministic — capacitive readings drift with humidity, hand proximity, and cable length, and we didn't want to be re-tuning thresholds during the demo. Two strips and a resistor per channel is dumber, more reliable hardware, and the spec called for resistors anyway.</p>
-
     <figure>
       <img src="images/04_collector_closeup.jpg" alt="Close-up of the 3D-printed ball collector with copper tape" />
       <figcaption>Two strips of copper tape per channel. A ball bridging them closes the switch.</figcaption>
@@ -473,8 +471,6 @@
     </figure>
 
     <p>Arm behavior is <strong>proportional</strong>, not binary. Rather than flipping between "neutral" and "deflect," each arm tilts further as its corresponding poison channel becomes more over-represented. The motor controller receives the distribution snapshot, computes each poison channel's share against the expected 20%, and maps the excess linearly to a step count up to a quarter revolution. If slot&nbsp;2 has 20% of recent balls, arm A is at rest. If it has 60%, arm A is at about half deflection. If it has 100%, arm A is at full quarter-turn.</p>
-
-    <p>Because steppers maintain absolute position, we track each arm's current step count and only drive the <em>delta</em> between current and target. This avoids the arms hunting back and forth and keeps them quiet between updates.</p>
 
     <ul class="nail-divider" aria-hidden="true">
       <li></li><li></li><li></li><li></li><li></li><li></li><li></li>
