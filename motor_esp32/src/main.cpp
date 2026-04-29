@@ -11,11 +11,12 @@
 #define MOTOR_IN3 26
 #define MOTOR_IN4 13
 
-#define STEPS_PER_ADJUSTMENT 1024
-#define STEP_DELAY_US 3000
+#define STEPS_PER_ADJUSTMENT 4096
+#define STEP_DELAY_US 5000
 
-int currentPosition = 0;
-int maxPosition = 512;
+volatile bool oscillating = false;
+static int stepIndex = 0;
+static int dirMultiplier = 1;  // flipped for left motor based on MAC
 
 typedef struct __attribute__((packed)) {
     int8_t adjustment;
@@ -45,7 +46,6 @@ void powerOffMotor() {
 void moveSteps(int steps) {
     int direction = steps > 0 ? 1 : -1;
     int absSteps = abs(steps);
-    static int stepIndex = 0;
 
     for (int i = 0; i < absSteps; i++) {
         stepIndex = (stepIndex + direction + 4) % 4;
@@ -55,30 +55,25 @@ void moveSteps(int steps) {
     powerOffMotor();
 }
 
-void adjustMotor(int8_t adjustment) {
-    int targetSteps = adjustment * STEPS_PER_ADJUSTMENT;
-    int newPosition = currentPosition + targetSteps;
-   
-    // If at limit, reset to center
-    if (newPosition > maxPosition || newPosition < -maxPosition) {
-        Serial.println("[MOTOR] At limit — resetting to center");
-        moveSteps(-currentPosition);
-        currentPosition = 0;
-        return;
+void moveForDuration(int direction, unsigned long durationMs) {
+    unsigned long start = millis();
+    while (millis() - start < durationMs) {
+        stepIndex = (stepIndex + direction + 4) % 4;
+        setMotorPins(stepIndex);
+        delayMicroseconds(STEP_DELAY_US);
     }
-   
-    int actualSteps = newPosition - currentPosition;
-    if (actualSteps != 0) {
-        Serial.printf("[MOTOR] Moving %d steps\n", actualSteps);
-        moveSteps(actualSteps);
-        currentPosition = newPosition;
-    }
+    powerOffMotor();
 }
 
 void onDataReceived(const uint8_t* mac, const uint8_t* data, int len) {
-    int8_t adjustment = (int8_t)data[0];
-    Serial.printf("[ESP-NOW] Received %d bytes, adjustment=%d\n", len, adjustment);
-    adjustMotor(adjustment);
+    int8_t cmd = (int8_t)data[0];
+    if (cmd != 0) {
+        oscillating = true;
+        Serial.println("[ESP-NOW] Command: START oscillating");
+    } else {
+        oscillating = false;
+        Serial.println("[ESP-NOW] Command: STOP oscillating");
+    }
 }
 
 void setup() {
@@ -103,9 +98,25 @@ void setup() {
 
     esp_now_register_recv_cb(onDataReceived);
     Serial.println("[ESP-NOW] Ready — listening for commands");
-    Serial.printf("[INFO] This ESP32 MAC: %s\n", WiFi.macAddress().c_str());
+
+    // Left motor MAC: A0:DD:6C:73:A4:50 — flip direction so it mirrors right motor
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    if (mac[3] == 0x73) dirMultiplier = -1;
+
+    Serial.printf("[INFO] This ESP32 MAC: %s dirMultiplier=%d\n",
+                  WiFi.macAddress().c_str(), dirMultiplier);
+
 }
 
 void loop() {
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    if (oscillating) {
+        Serial.println("[MOTOR] Moving left for 10s...");
+        moveForDuration(-1 * dirMultiplier, 10000);
+        if (!oscillating) return;
+        Serial.println("[MOTOR] Moving right for 10s...");
+        moveForDuration(+1 * dirMultiplier, 10000);
+    } else {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }
